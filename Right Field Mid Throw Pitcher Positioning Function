@@ -1,0 +1,182 @@
+#Sourcing starter code
+source("SMT_Data_Starter_2025.R")
+#getting tidyverse package
+library(tidyverse)
+
+game_events_df <- game_events %>% 
+  collect()
+player_pos_df <- player_pos %>% 
+  filter(player_position == 1) %>% 
+  collect()
+game_info_df <- game_info %>% 
+  collect()
+ball_pos_df <- ball_pos %>% 
+  collect()
+
+#This is the process_game funciton. It takes in the game_str_val to run through each game. It uses the all_game_strs down below to 
+#get to each unique game.
+process_game <- function(game_str_val) {
+  
+  # Filtering all of the datasets we will use for the unqiue game_str value. Now all the datasets is for the specific game.
+  player_pos_game <- player_pos_df %>% filter(game_str == game_str_val)
+  game_info_game <- game_info_df %>% filter(game_str == game_str_val)
+  game_events_game <- game_events_df %>% filter(game_str == game_str_val)
+  ball_pos_game <- ball_pos_df %>% filter(game_str == game_str_val)
+  
+  # Create base state through an if/else statement applying a 1 if there is a value and a 0 if there is not.
+  base_runners <- game_info_game %>%
+    mutate(base_state = paste0(
+      if_else(!is.na(first_baserunner), "1", "0"),
+      if_else(!is.na(second_baserunner), "1", "0"),
+      if_else(!is.na(third_baserunner), "1", "0")
+    )) %>%
+    #selecting necessary values.
+    select(game_str, play_per_game, base_state)
+  
+  #selecting games dataset and creating play_str variable. This is necessary because games dataset has both play_per_game and play_id
+  #while base_runners only has play_per_game. It is a must for left_joining.
+  games <- game_events_game %>%
+    select(game_str, play_id, at_bat, play_per_game) %>%
+    distinct() %>%
+    mutate(play_str = paste0(game_str, "_", play_id))
+  
+  #left_joining so now we have the games dataset with base state.
+  plays_with_base_state <- left_join(base_runners, games, by = c("game_str", "play_per_game")) %>%
+    select(play_str, game_str, play_id, play_per_game, base_state) %>%
+    mutate(play_id = as.numeric(play_id))
+  
+  # Filtering for Plays where LF acquires a bounced ball. This code says that the ball bounced and then acquired by LF.
+  #Then creating play_str and selecting important variables.
+  right_field_with_bounce <- game_events_game %>%
+    group_by(game_str, play_id) %>%
+    filter((player_position == 255 & event_code == 16) &
+             (lead(player_position) == 9 & lead(event_code) == 2)) %>%
+    ungroup() %>%
+    mutate(play_str = paste0(game_str, "_", play_id)) %>%
+    select(play_str, game_str, play_id, timestamp)
+  
+  #filtering our large dataset for only plays where there is a bounce. We now have a dataset of only plays where it bounced to RF
+  right_field_bounce_with_base_state <- plays_with_base_state %>%
+    filter(play_str %in% right_field_with_bounce$play_str)
+  
+  # Calculate exit velocity for balls that bounced to RF.
+  velocity_of_bounced_ball_right <- ball_pos_game %>%
+    #making numeric for calculations.
+    mutate(play_id = as.numeric(play_id),
+           play_str = paste0(game_str, "_", play_id),
+           ball_position_x = as.numeric(ball_position_x),
+           ball_position_y = as.numeric(ball_position_y),
+           timestamp = as.numeric(timestamp)) %>%
+    #filtering for plays that bounced to right field
+    filter(play_str %in% right_field_with_bounce$play_str) %>%
+    group_by(play_str) %>%
+    #calculating distance, time, and velo. Need to convert from meters per second to miles per hour so we 
+    #multiple by 1k and divide by 1.467.
+    mutate(distance = sqrt((ball_position_x - lag(ball_position_x))^2 +
+                             (ball_position_y - lag(ball_position_y))^2),
+           time = timestamp - lag(timestamp),
+           velo = (1000 * (distance / time) / 1.467)) %>%
+    slice(2:4) %>%
+    #creating median velo for each play.
+    summarize(exit_velo = median(velo, na.rm = TRUE), .groups = "drop") %>%
+    #case when to add a variable of hard or soft hit.
+    mutate(hard_hit = case_when(exit_velo >= 86 ~ "hard", TRUE ~ "soft"))
+  
+  #now joining into an entire base state that has exit velocity for each play 
+  RF_basestate_velocity <- left_join(right_field_bounce_with_base_state,
+                                     velocity_of_bounced_ball_right,
+                                     by = "play_str")
+  
+  #filtering for plays where RF threw the ball in order to calculate arm velocity
+  right_throws <- game_events_game %>%
+    group_by(game_str, play_id) %>%
+    filter(player_position == 9 & event_code == 3) %>%
+    ungroup() %>%
+    select(game_str, play_id, throw_timestamp = timestamp, play_per_game)
+  
+  #calculating arm velocity
+  arm_velo <- ball_pos_game %>%
+    #filtering for only plays where CF makes a throw
+    filter(play_id %in% right_throws$play_id) %>%
+    #making numeric for calculations
+    mutate(play_id = as.numeric(play_id),
+           ball_position_x = as.numeric(ball_position_x),
+           ball_position_y = as.numeric(ball_position_y),
+           timestamp = as.numeric(timestamp)) %>%
+    #left joining so we have the timestamp of each throw in the dataset now
+    left_join(right_throws, by = join_by(game_str, play_id), relationship = "many-to-many") %>%
+    group_by(game_str, play_id) %>%
+    #making it so the dataset only has the ball positioning after or at time of throw
+    filter(timestamp >= throw_timestamp) %>%
+    #calculating distance, time, and velocity
+    mutate(distance = sqrt((ball_position_x - lag(ball_position_x))^2 +
+                             (ball_position_y - lag(ball_position_y))^2),
+           time = timestamp - lag(timestamp),
+           velo = (1000 * (distance / time) / 1.467)) %>%
+    #only taking the 2-4 rows of each play so we can get a median velocity.
+    slice(2:4) %>%
+    #calculating arm strength from the median 
+    mutate(arm_strength = median(velo, na.rm = TRUE),
+           play_str = paste0(game_str, "_", play_id)) %>%
+    ungroup() %>%
+    select(play_id, game_str, play_per_game, arm_strength, play_str)
+  
+  #grabbing the RF names so we can assign arm velocities to each player
+  long_game_info <- game_info_game %>%
+    #grabbing only right fielders
+    select(game_str, play_per_game, contains("right_field")) %>%
+    #this looks at the right field column. it takes the right field column, takes the values and puts it into player name column.
+    #it takes the value of "right_field" and puts it in the player position column.
+    pivot_longer(cols = c('right_field'),
+                 names_to = "player_position",
+                 values_to = "player_name") %>%
+    #changes player position values to 9.
+    mutate(player_position = 9)
+  
+  # Arm strength lookup is created as each arm velocity now has a player assigned to it.
+  arm_strength_lookup <- left_join(arm_velo, long_game_info,
+                                   by = c("game_str", "play_per_game"), relationship = "many-to-many") %>%
+    distinct() %>%
+    select(game_str, play_id, player_name, arm_strength, play_str) %>%
+    filter(!is.na(player_name)) %>%
+    #groups by player name so we can create arm buckets of seasons-wide data.
+    group_by(player_name) %>%
+    #creates a 95th percentile of all the arm strength values, then assigns it into arm buckets.
+    mutate(arm_strength_95 = quantile(arm_strength, .95),
+           n_throws = n(),
+           arm_bucket = case_when(
+             arm_strength_95 >= 70 & arm_strength_95 < 85 ~ "70-85",
+             arm_strength_95 >= 85 & arm_strength_95 < 100 ~ "85-100",
+             TRUE ~ "<70")) %>%
+    ungroup() %>%
+    select(play_str, arm_strength_95, arm_bucket, player_name)
+  
+  #joins arm strength lookups to the dataset with base state and exit velocity.
+  RF_basestate_arm_bucket_velo <- left_join(RF_basestate_velocity, arm_strength_lookup, by = "play_str")
+  
+  #getting player positioning for each play necessary.
+  pitcher_pos_throw <- player_pos_game %>%
+    mutate(play_id = as.numeric(play_id)) %>%
+    #joining in center throws so we can get pitcher positioning at timestamp throw
+    inner_join(right_throws %>% select(game_str, play_id, throw_timestamp),
+               by = c("game_str", "play_id"), relationship = "many-to-many") %>%
+    filter(timestamp == throw_timestamp) %>%
+    mutate(play_str = paste0(game_str, "_", play_id)) %>%
+    select(play_str, field_x, field_y, throw_timestamp)
+  
+  # Final join. Now we have pitcher positioning with all the scenarios - exit velo, base state, arm velo.
+  RF_positioning_arm_bucket <- left_join(RF_basestate_arm_bucket_velo,
+                                         pitcher_pos_throw,
+                                         by = "play_str")
+  
+  return(RF_positioning_arm_bucket)
+}
+
+# This collects every unique game_str value in the dataset and puts in into one dataset.
+all_game_strs <- unique(game_events_df$game_str)
+
+#This runs the process_game function for every game_str in the all_game_strs dataset.
+RF_all_data <- map_dfr(all_game_strs, process_game)
+
+# Save to CSV
+write_csv(RF_all_data, "RF_positioning_arm_bucket_analysis.csv")
