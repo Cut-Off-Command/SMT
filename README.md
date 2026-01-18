@@ -46,13 +46,13 @@ Built entirely without AI assistance.
 
 ## Screenshots
 
-![Main interface](png1.png)
+![Main interface](interface.png)
 *A look at the application when first opened*
 
-![Example heatmap](png2.png)
+![Example heatmap](heatmap.png)
 *Heatmap showing pitcher positioning: runner on 1st, right field, all exit velocities, 85+ mph throw*
 
-![Mobile view](png3.png)
+![Mobile view](mobile.png)
 *Mobile-optimized interface*
 
 ## What we learned
@@ -74,4 +74,4 @@ With better data coverage, this could expand to:
 
 Built for the 2025 SMT Data Challenge. We'd like to thank Meredith Wills and Billy Fryer for all of their mentorship and support throughout this process.
 
-[Full writeup with methodology and user guide](./Team_93_SMT_Write-Up.pdf)
+[Full writeup with methodology and user guide](Team_93_SMT_Write-Up.pdf)
