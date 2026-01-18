@@ -74,4 +74,4 @@ With better data coverage, this could expand to:
 
 Built for the 2025 SMT Data Challenge. We'd like to thank Meredith Wills and Billy Fryer for all of their mentorship and support throughout this process.
 
-[Full writeup with methodology and user guide](Team_93_SMT_Write-Up.pdf)
+[Full writeup with methodology and user guide](./Team_93_SMT_Write-Up.pdf)
