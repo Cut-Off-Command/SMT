@@ -46,11 +46,11 @@ Built entirely without AI assistance.
 
 ## Screenshots
 
-![Main interface with bases toggled](png1.png)
-*Main screen with bases toggled*
+![Main interface](png1.png)
+*A look at the application when first opened*
 
 ![Example heatmap](png2.png)
-*Heatmap showing pitcher positioning: runner on 2nd, right field, 85+ mph throw*
+*Heatmap showing pitcher positioning: runner on 1st, right field, all exit velocities, 85+ mph throw*
 
 ![Mobile view](png3.png)
 *Mobile-optimized interface*
